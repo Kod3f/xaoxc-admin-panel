@@ -491,7 +491,9 @@ function applyRemote(remote){
 function loadCollab(){
   var sb=document.getElementById('status-bar');if(sb)sb.textContent='Connexion…';
   try{
-    sbClient=supabase.createClient(SB_URL,SB_KEY);
+    sbClient=supabase.createClient(SB_URL,SB_KEY,{
+      global:{headers:{'x-admin-key':'MaraKeshh40000project'}}
+    });
 
     // ── Presence — who's online ───────────────────────────────────────────
     presenceChannel=sbClient.channel('xaoc_presence');
@@ -1049,34 +1051,46 @@ function ideasTab(){
   w.appendChild(submit);
 
   if(!isVisitor){
-    // Admin view — all ideas
-    if(!data.ideas||data.ideas.length===0){
-      var empty=el('div',{cls:'card',css:{textAlign:'center',color:'var(--mt)',padding:'40px',fontSize:'13px'}});
-      empty.appendChild(document.createTextNode('Aucune idée reçue pour l\'instant.'));
-      w.appendChild(empty);
-    } else {
-      var list=el('div',{cls:'gap'});
-      var sorted=data.ideas.slice().sort(function(a,b){return b.ts-a.ts;});
-      sorted.forEach(function(idea){
-        var card=el('div',{cls:'card',css:{position:'relative'}});
-        var meta=el('div',{css:{display:'flex',alignItems:'center',gap:'10px',marginBottom:'10px'}});
-        var av=el('div',{css:{width:'26px',height:'26px',borderRadius:'50%',background:userColor(idea.name),color:textColor(userColor(idea.name)),display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',flexShrink:'0'}},ini(idea.name));
-        meta.appendChild(av);
-        meta.appendChild(el('span',{css:{fontWeight:'600',fontSize:'13px'}},idea.name));
-        var d=new Date(idea.ts);
-        var dateStr=d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})+' · '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-        meta.appendChild(el('span',{css:{fontSize:'11px',color:'var(--mt)',marginLeft:'auto'}},dateStr));
-        if(idea.ip){meta.appendChild(el('span',{css:{fontSize:'10px',color:'var(--mt)',background:'var(--s3)',padding:'2px 7px',borderRadius:'3px',marginLeft:'6px',fontFamily:'monospace'}},idea.ip));}
-        var delBtn=el('button',{cls:'btn-x',css:{marginLeft:'8px'},onClick:function(){data.ideas=data.ideas.filter(function(x){return x.id!==idea.id;});save();renderContent();}},'\u2715');
-        meta.appendChild(delBtn);
-        card.appendChild(meta);
-        card.appendChild(el('div',{css:{fontSize:'14px',lineHeight:'1.75',color:'var(--tx)',whiteSpace:'pre-wrap'}},idea.text));
-        list.appendChild(card);
-      });
-      w.appendChild(list);
+    var listWrap=el('div',{cls:'gap',css:{marginTop:'8px'}});
+    var loading=el('div',{cls:'card',css:{textAlign:'center',color:'var(--mt)',padding:'24px',fontSize:'13px'}});
+    loading.appendChild(document.createTextNode('Chargement…'));
+    listWrap.appendChild(loading);
+    w.appendChild(listWrap);
+    if(sbClient){
+      sbClient.from('xaoc_ideas').select('*').order('ts',{ascending:false})
+        .then(function(res){
+          listWrap.innerHTML='';
+          var ideas=res.data||[];
+          if(ideas.length===0){
+            var empty=el('div',{cls:'card',css:{textAlign:'center',color:'var(--mt)',padding:'40px',fontSize:'13px'}});
+            empty.appendChild(document.createTextNode('Aucune idée reçue pour l\'instant.'));
+            listWrap.appendChild(empty);
+          } else {
+            ideas.forEach(function(idea){
+              var card=el('div',{cls:'card',css:{position:'relative'}});
+              var meta=el('div',{css:{display:'flex',alignItems:'center',gap:'10px',marginBottom:'10px'}});
+              var av=el('div',{css:{width:'26px',height:'26px',borderRadius:'50%',background:userColor(idea.name),color:textColor(userColor(idea.name)),display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'700',flexShrink:'0'}},ini(idea.name));
+              meta.appendChild(av);
+              meta.appendChild(el('span',{css:{fontWeight:'600',fontSize:'13px'}},idea.name));
+              var d=new Date(idea.ts);
+              var dateStr=d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'})+' · '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+              meta.appendChild(el('span',{css:{fontSize:'11px',color:'var(--mt)',marginLeft:'auto'}},dateStr));
+              if(idea.ip){meta.appendChild(el('span',{css:{fontSize:'10px',color:'var(--mt)',background:'var(--s3)',padding:'2px 7px',borderRadius:'3px',marginLeft:'6px',fontFamily:'monospace'}},idea.ip));}
+              (function(ideaId){
+                var delBtn=el('button',{cls:'btn-x',css:{marginLeft:'8px'},onClick:function(){
+                  if(sbClient)sbClient.from('xaoc_ideas').delete().eq('id',ideaId)
+                    .then(function(){renderContent();});
+                }},'\u2715');
+                meta.appendChild(delBtn);
+              })(idea.id);
+              card.appendChild(meta);
+              card.appendChild(el('div',{css:{fontSize:'14px',lineHeight:'1.75',color:'var(--tx)',whiteSpace:'pre-wrap'}},idea.text));
+              listWrap.appendChild(card);
+            });
+          }
+        });
     }
   } else {
-    // Visitor: confirmation message only
     var info=el('div',{css:{textAlign:'center',color:'var(--mt)',fontSize:'12px',marginTop:'4px'}});
     info.appendChild(document.createTextNode('Votre idée sera transmise directement à l\'équipe. Merci !'));
     w.appendChild(info);
@@ -1084,19 +1098,19 @@ function ideasTab(){
   return w;
 }
 
+
 function submitIdea(ta){
   var text=(ta.value||'').trim();
   if(!text)return;
-  if(!data.ideas)data.ideas=[];
   var idea={id:genId(),name:me.name,ts:Date.now(),text:text,ip:'…'};
-  data.ideas.push(idea);
-  ta.value='';
-  save();renderContent();
-  // fetch IP in background and update
+  ta.value='';renderContent();
   fetch('https://api.ipify.org?format=json')
-    .then(function(r){return r.json();})
-    .then(function(d){idea.ip=d.ip||'N/A';save();renderContent();})
-    .catch(function(){idea.ip='N/A';save();renderContent();});
+    .then(function(r){return r.json();}).catch(function(){return{ip:'N/A'};})
+    .then(function(d){
+      idea.ip=d.ip||'N/A';
+      if(sbClient)sbClient.from('xaoc_ideas').insert(idea)
+        .then(function(res){if(res.error)console.warn('idea insert error',res.error);});
+    });
 }
 
 loadData();
