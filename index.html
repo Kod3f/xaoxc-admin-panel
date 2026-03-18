@@ -528,6 +528,13 @@ function loadCollab(){
       .on('broadcast',{event:'notes_update'},function(p){
         var ta=document.getElementById('notes-ta');
         if(!ta||!p.payload||p.payload.from===me.name)return;
+        // Hide pin FIRST before any text change
+        if(onlineUsers[p.payload.from]){
+          onlineUsers[p.payload.from]._typing=true;
+          clearTimeout(onlineUsers[p.payload.from]._idleTimer);
+          var pin=document.querySelector('[data-uid="'+p.payload.from+'"]');
+          if(pin)pin.style.visibility='hidden';
+        }
         var sel=[ta.selectionStart,ta.selectionEnd];
         ta.value=p.payload.text;
         data.notes=p.payload.text;
@@ -535,8 +542,6 @@ function loadCollab(){
         if(onlineUsers[p.payload.from]){
           onlineUsers[p.payload.from].cursor=p.payload.pos;
           onlineUsers[p.payload.from].sel=p.payload.sel||null;
-          onlineUsers[p.payload.from]._typing=true;
-          clearTimeout(onlineUsers[p.payload.from]._idleTimer);
           onlineUsers[p.payload.from]._idleTimer=setTimeout(function(){
             if(onlineUsers[p.payload.from]){
               onlineUsers[p.payload.from]._typing=false;
