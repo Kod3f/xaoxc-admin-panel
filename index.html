@@ -558,14 +558,6 @@ function loadCollab(){
         ta.value=p.payload.text;data.notes=p.payload.text;
         ta.setSelectionRange(Math.min(sel[0],ta.value.length),Math.min(sel[1],ta.value.length));
       })
-      .on('broadcast',{event:'cursor_pos'},function(p){
-        if(!p.payload||p.payload.from===me.name)return;
-        if(onlineUsers[p.payload.from]){
-          onlineUsers[p.payload.from].cursor=p.payload.pos;
-          onlineUsers[p.payload.from].sel=p.payload.sel||null;
-          if(tab==='notes')renderAllCursors();
-        }
-      })
       .subscribe();
 
     // ── Load state from DB ────────────────────────────────────────────────
@@ -921,7 +913,6 @@ function setupCursorTracking(ta){
       var pos=ta.selectionStart;
       var selData={start:ta.selectionStart,end:ta.selectionEnd};
       if(onlineUsers[me.name]){onlineUsers[me.name].cursor=pos;onlineUsers[me.name].sel=selData;}
-      if(notesChannel)notesChannel.send({type:'broadcast',event:'cursor_pos',payload:{from:me.name,pos:pos,sel:selData}});
       if(presenceChannel)presenceChannel.track({name:me.name,color:me.color,cursor:pos,sel:selData});
     },50);
   }
