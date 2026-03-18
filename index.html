@@ -247,17 +247,15 @@ select option{background:#1F1F1F}
     <hr>
     <label>Votre prénom</label>
     <input id="ln" type="text" placeholder="Prénom" autocomplete="off" maxlength="24">
-    <label>Mot de passe</label>
-    <input id="lp" type="password" placeholder="Mot de passe de l'espace">
-    <button id="lb">Entrer dans l'espace →</button>
-    <div id="le" class="err"></div>
-    <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
-      <div style="flex:1;height:1px;background:var(--br)"></div>
-      <span style="font-size:10px;color:var(--mt);letter-spacing:.08em">ou</span>
-      <div style="flex:1;height:1px;background:var(--br)"></div>
+    <div id="admin-block" style="display:none">
+      <label style="display:block;margin-bottom:6px">Mot de passe</label>
+      <input id="lp" type="password" placeholder="Mot de passe de l'espace">
     </div>
-    <button id="lv" style="width:100%;background:transparent;border:1px solid var(--br);border-radius:5px;color:var(--mt);font-size:13px;font-family:inherit;padding:10px;cursor:pointer;transition:border-color .15s,color .15s">Accès visiteur — soumettre une idée</button>
-    <p class="hint">Espace partagé — même mot de passe pour toute l'équipe.</p>
+    <button id="lb">Accéder →</button>
+    <div id="le" class="err"></div>
+    <div style="text-align:center;margin-top:2px">
+      <button id="toggle-admin" style="background:none;border:none;color:var(--mt);font-size:11px;font-family:inherit;cursor:pointer;padding:4px 0;text-decoration:underline;text-underline-offset:3px">Accès équipe</button>
+    </div>
   </div>
 </div>
 
@@ -409,9 +407,22 @@ function sha256js(s){
   return H.map(function(x){return x.toString(16).padStart(8,'0');}).join('');
 }
 
-document.getElementById('lb').onclick=doLogin;
-document.getElementById('lv').onclick=doVisitor;
-document.getElementById('ln').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('lp').focus();});
+var adminMode=false;
+document.getElementById('toggle-admin').onclick=function(){
+  adminMode=!adminMode;
+  document.getElementById('admin-block').style.display=adminMode?'block':'none';
+  document.getElementById('lb').textContent=adminMode?'Entrer dans l\'espace →':'Accéder →';
+  document.getElementById('toggle-admin').textContent=adminMode?'Annuler':'Accès équipe';
+};
+document.getElementById('lb').onclick=function(){
+  if(adminMode)doLogin();else doVisitor();
+};
+document.getElementById('ln').addEventListener('keydown',function(e){
+  if(e.key==='Enter'){
+    if(adminMode)document.getElementById('lp').focus();
+    else doVisitor();
+  }
+});
 document.getElementById('lp').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin();});
 
 function doLogin(){
@@ -420,15 +431,12 @@ function doLogin(){
   var errEl=document.getElementById('le');errEl.textContent='';
   if(!name){errEl.textContent='Entrez votre prénom.';return;}
   if(!pass){errEl.textContent='Entrez le mot de passe.';return;}
-
-  // Brute force check
   var att=getAttempts();
   if(att.n>=MAX_ATTEMPTS){
     var remaining=Math.ceil((LOCKOUT_MS-(Date.now()-att.t))/1000);
     if(remaining>0){errEl.textContent='Trop de tentatives. Réessayez dans '+remaining+'s.';return;}
     else setAttempts(0,0);
   }
-
   var btn=document.getElementById('lb');btn.disabled=true;btn.textContent='Vérification…';
   sha256(pass).then(function(hash){
     btn.disabled=false;btn.textContent='Entrer dans l\'espace →';
