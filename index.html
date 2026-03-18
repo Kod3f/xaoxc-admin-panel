@@ -354,11 +354,11 @@ function loadData(){try{var s=localStorage.getItem('pxmrk5');if(s)data=JSON.pars
 var saveT=null;
 function save(){
   data._ts=Date.now();
+  // Write to localStorage immediately
+  try{localStorage.setItem('pxmrk5',JSON.stringify(data));}catch(e){}
+  // Debounce status bar only
   clearTimeout(saveT);saveT=setTimeout(function(){
-    try{
-      localStorage.setItem('pxmrk5',JSON.stringify(data));
-      var sb=document.getElementById('status-bar');if(sb){sb.textContent='Sauvegardé ✓';setTimeout(function(){sb.textContent='';},2000);}
-    }catch(e){}
+    var sb=document.getElementById('status-bar');if(sb){sb.textContent='Sauvegardé ✓';setTimeout(function(){sb.textContent='';},2000);}
   },400);
   pushToRoom();
 }
