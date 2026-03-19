@@ -365,12 +365,49 @@ function save(){
 
 var CLIENT_ID=Math.random().toString(36).slice(2);
 
+// ── ENCRYPTION (AES-GCM 256) ─────────────────────────────────────────────────
+var _cryptoKey=null;
+
+async function deriveKey(password){
+  var enc=new TextEncoder();
+  var keyMaterial=await crypto.subtle.importKey('raw',enc.encode(password),{name:'PBKDF2'},false,['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2',salt:enc.encode('xaoc-marrakech-2026'),iterations:100000,hash:'SHA-256'},
+    keyMaterial,{name:'AES-GCM',length:256},false,['encrypt','decrypt']
+  );
+}
+
+async function encryptData(obj){
+  if(!_cryptoKey)return JSON.stringify(obj);
+  var iv=crypto.getRandomValues(new Uint8Array(12));
+  var enc=new TextEncoder();
+  var ct=await crypto.subtle.encrypt({name:'AES-GCM',iv:iv},_cryptoKey,enc.encode(JSON.stringify(obj)));
+  var buf=new Uint8Array(iv.length+ct.byteLength);
+  buf.set(iv,0);buf.set(new Uint8Array(ct),iv.length);
+  return btoa(String.fromCharCode.apply(null,buf));
+}
+
+async function decryptData(b64){
+  if(!_cryptoKey)return JSON.parse(b64);
+  try{
+    var buf=Uint8Array.from(atob(b64),function(c){return c.charCodeAt(0);});
+    var iv=buf.slice(0,12),ct=buf.slice(12);
+    var dec=await crypto.subtle.decrypt({name:'AES-GCM',iv:iv},_cryptoKey,ct);
+    return JSON.parse(new TextDecoder().decode(dec));
+  }catch(e){
+    // Fallback: try plain JSON (migration from unencrypted)
+    try{return typeof b64==='string'?JSON.parse(b64):b64;}catch(e2){return b64;}
+  }
+}
+
 function pushToRoom(){
   if(!sbClient)return;
   data._cid=CLIENT_ID;
-  sbClient.from('xaoc_state')
-    .upsert({id:'main', data:data, updated_at:new Date().toISOString()})
-    .then(function(res){if(res.error)console.warn('Supabase push error:',res.error);});
+  encryptData(data).then(function(encrypted){
+    sbClient.from('xaoc_state')
+      .upsert({id:'main', data:encrypted, updated_at:new Date().toISOString()})
+      .then(function(res){if(res.error)console.warn('Supabase push error:',res.error);});
+  });
 }
 
 // ── SECURITY ─────────────────────────────────────────────────────────────────
@@ -450,11 +487,14 @@ function doLogin(){
     setAttempts(0,0);
     var color=userColor(name);
     me={name:name,color:color,visitor:false,_t:Date.now()};
-    try{sessionStorage.setItem('pxs',JSON.stringify(me));}catch(e){}
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app').classList.add('show');
-    renderNav();renderContent();renderUserBar();
-    setTimeout(function(){loadCollab();},100);
+    try{sessionStorage.setItem('pxs',JSON.stringify(me));sessionStorage.setItem('pxk',pass);}catch(e){}
+    deriveKey(pass).then(function(key){
+      _cryptoKey=key;
+      document.getElementById('login-screen').style.display='none';
+      document.getElementById('app').classList.add('show');
+      renderNav();renderContent();renderUserBar();
+      setTimeout(function(){loadCollab();},100);
+    });
   });
 }
 
@@ -575,16 +615,24 @@ function loadCollab(){
     sbClient.from('xaoc_state').select('data').eq('id','main').single()
       .then(function(res){
         if(res.data&&res.data.data){
-          try{
-            var remote=res.data.data; // already an object — JSONB
-            if(typeof remote==='string')remote=JSON.parse(remote);
-            var savedNotes=data.notes;data=remote;data.notes=savedNotes;
-            localStorage.setItem('pxmrk5',JSON.stringify(data));
-          }catch(e){console.warn('load parse error',e);}
-        } else {pushToRoom();}
-        collabOk=true;
-        if(sb){sb.textContent='Collab ✓';setTimeout(function(){sb.textContent='';},3000);}
-        renderContent();renderUserBar();
+          var raw=res.data.data;
+          // raw is either a base64 encrypted string or legacy object
+          var decPromise=typeof raw==='string'?decryptData(raw):Promise.resolve(raw);
+          decPromise.then(function(remote){
+            if(remote&&typeof remote==='object'){
+              var savedNotes=data.notes;data=remote;data.notes=savedNotes;
+              localStorage.setItem('pxmrk5',JSON.stringify(data));
+            }
+            collabOk=true;
+            if(sb){sb.textContent='Collab ✓';setTimeout(function(){sb.textContent='';},3000);}
+            renderContent();renderUserBar();
+          });
+        } else {
+          pushToRoom();
+          collabOk=true;
+          if(sb){sb.textContent='Collab ✓';setTimeout(function(){sb.textContent='';},3000);}
+          renderContent();renderUserBar();
+        }
       }).catch(function(){
         collabOk=true;pushToRoom();
         renderContent();renderUserBar();
@@ -594,7 +642,9 @@ function loadCollab(){
     sbClient.channel('xaoc_db')
       .on('postgres_changes',{event:'UPDATE',schema:'public',table:'xaoc_state'},function(payload){
         if(!payload.new||!payload.new.data)return;
-        applyRemote(payload.new.data); // already an object from JSONB
+        var raw=payload.new.data;
+        var decPromise=typeof raw==='string'?decryptData(raw):Promise.resolve(raw);
+        decPromise.then(function(remote){if(remote)applyRemote(remote);});
       })
       .subscribe();
 
@@ -607,7 +657,7 @@ function renderUserBar(){
   Object.values(onlineUsers).forEach(function(u){if(u.name!==me.name)users.push({name:u.name,color:u.color,local:false});});
   users.forEach(function(u){
     var tip=u.local
-      ? el("div",{cls:"av-tip"},u.name+" (vous)",el("div",{css:{marginTop:"6px",borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:"6px"}},el("button",{css:{background:"var(--er)",border:"none",borderRadius:"3px",color:"#fff",fontSize:"10px",fontWeight:"700",padding:"3px 10px",cursor:"pointer",width:"100%",fontFamily:"inherit"},onClick:function(){sessionStorage.removeItem("pxs");location.reload();}},"2192 D00e9connexion")))
+      ? el("div",{cls:"av-tip"},u.name+" (vous)",el("div",{css:{marginTop:"6px",borderTop:"1px solid rgba(255,255,255,.15)",paddingTop:"6px"}},el("button",{css:{background:"var(--er)",border:"none",borderRadius:"3px",color:"#fff",fontSize:"10px",fontWeight:"700",padding:"3px 10px",cursor:"pointer",width:"100%",fontFamily:"inherit"},onClick:function(){sessionStorage.removeItem("pxs");sessionStorage.removeItem("pxk");_cryptoKey=null;location.reload();}},"→ Déconnexion")))
       : el("div",{cls:"av-tip"},u.name);
     var av=el("div",{cls:"av",css:{background:u.color,color:textColor(u.color),outline:u.local?("2px solid "+u.color):"none",outlineOffset:"2px"}},ini(u.name),tip);
     bar.appendChild(av);
@@ -1149,13 +1199,24 @@ try{
     var SESSION_TTL=8*60*60*1000; // 8 hours
     if(parsed._t&&(Date.now()-parsed._t)>SESSION_TTL){
       sessionStorage.removeItem('pxs');
+      sessionStorage.removeItem('pxk');
     } else {
       me=parsed;
       document.getElementById('login-screen').style.display='none';
       document.getElementById('app').classList.add('show');
       if(me.visitor)tab='ideas';
-      renderNav();renderContent();renderUserBar();
-      setTimeout(function(){loadCollab();},100);
+      // Re-derive crypto key for admin sessions
+      var storedPass=sessionStorage.getItem('pxk');
+      if(!me.visitor&&storedPass){
+        deriveKey(storedPass).then(function(key){
+          _cryptoKey=key;
+          renderNav();renderContent();renderUserBar();
+          setTimeout(function(){loadCollab();},100);
+        });
+      } else {
+        renderNav();renderContent();renderUserBar();
+        setTimeout(function(){loadCollab();},100);
+      }
     }
   }
 }catch(e){}
